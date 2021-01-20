@@ -1,30 +1,32 @@
 import * as ansicolor from 'ansicolor';
+
 import * as path from 'path';
+
 import * as fs from 'fs';
 
-// Utils
+import validateNpmPackageName = require('validate-npm-package-name');
+
+import { colorize } from '../colorize-special-text';
+import { Terminateable } from '../common-traits';
+import { CONFIG_FILE_RELATIVE_PATH, CONFIG_FILE_ABSOLUTE_PATH, PACKAGES_DIRECTORY_RELATIVE_PATH, GLOBAL_SCOPE_NAME, PACKAGES_DIRECTORY_NAME, PACKAGE_NAME_CONFIG_PATH_REQUIRED_SUFFIX } from '../common-values';
+import { ConfigError, ErrorType } from '../error';
+import { PackageConfig, PackageConfigJunction, isNotJunction } from '../config-file-structural-checking/config';
+import { parseTSMonorepoJson } from '../config-file-structural-checking/parse';
+import { assertFileExists, assertDirectoryExistsOrCreate } from '../file-system/presence-assertions';
+import { MonoreportPackageRegistry } from '../package-dependencies/monorepo-package-registry';
+import { CommandRunner } from '../util/command-runner';
 import { fsAsync } from '../util/fs-async';
 import { log } from '../util/log';
+import { comprehensiveDelete } from '../util/recursive-delete-directory';
 import { validateDirectoryPresence, validateSymlinkPresence } from '../util/validate-presence-in-file-system';
 
-// Config File Validation
-import validateNpmPackageName = require('validate-npm-package-name');
 import { PackageDependencyTracker } from './package-dependency-tracker';
-import { syncPackageJSON } from './specific-files/sync-package.json.js';
-import { syncTSConfigJSON } from './specific-files/sync-tsconfig.json.js';
-import { syncLernaJSON } from './specific-files/sync-lerna.json.js';
-import { syncTSConfigLeavesJSON } from './specific-files/sync-tsconfig-leaves.json.js';
-import { CommandRunner } from '../util/command-runner';
-import { comprehensiveDelete } from '../util/recursive-delete-directory';
-import { assertFileExists, assertDirectoryExistsOrCreate } from '../file-system/presence-assertions';
-import { CONFIG_FILE_RELATIVE_PATH, CONFIG_FILE_ABSOLUTE_PATH, PACKAGES_DIRECTORY_RELATIVE_PATH, GLOBAL_SCOPE_NAME, PACKAGES_DIRECTORY_NAME, PACKAGE_NAME_CONFIG_PATH_REQUIRED_SUFFIX } from '../common-values';
-import { parseTSMonorepoJson } from '../config-file-structural-checking/parse';
 import { validateScope } from './validate-scope';
-import { ConfigError, ErrorType } from '../error';
-import { Terminateable } from '../common-traits';
-import { colorize } from '../colorize-special-text';
-import { PackageConfig, PackageConfigJunction, isNotJunction } from '../config-file-structural-checking/config';
-import { MonoreportPackageRegistry } from '../package-dependencies/monorepo-package-registry';
+
+import { syncLernaJSON } from './specific-files/sync-lerna.json.js';
+import { syncPackageJSON } from './specific-files/sync-package.json.js';
+import { syncTSConfigLeavesJSON } from './specific-files/sync-tsconfig-leaves.json.js';
+import { syncTSConfigJSON } from './specific-files/sync-tsconfig.json.js';
 
 const CONFIGURATION_ERROR = new Error("See above error message(s)");
 CONFIGURATION_ERROR.stack = undefined;
@@ -352,6 +354,18 @@ export async function syncMonorepo(): Promise<Terminateable> {
         throw preBuildError;
     }
 
+    await syncProject()
+
+    // tsc (or ttsc)
+    await syncTSConfigLeavesJSON(leafPackages, monorepoConfig);
+
+    return monorepoConfig.ttypescript;
+}
+
+const syncProject = syncLernaProject
+
+async function syncLernaProject(opts: any = {}) {
+    const { lernaJSONPackagePaths, monorepoConfig } = opts
     // Lerna
     await syncLernaJSON(lernaJSONPackagePaths, monorepoConfig);
 
@@ -367,11 +381,6 @@ export async function syncMonorepo(): Promise<Terminateable> {
     const lernaBoostrap = new CommandRunner(lernaInstallAndLinkCommand);
     lernaBoostrap.start();
     await lernaBoostrap.waitUntilDone();
-
-    // tsc (or ttsc)
-    await syncTSConfigLeavesJSON(leafPackages, monorepoConfig);
-
-    return monorepoConfig.ttypescript;
 }
 
 function assertNoErrors(errors: ConfigError[]) {
